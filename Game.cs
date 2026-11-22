@@ -19,7 +19,7 @@ public class Game
         mainMenu.Load();
         cursor.Load();
 
-        while (!Raylib.WindowShouldClose())
+        while (!Raylib.WindowShouldClose() && !mainMenu.ExitRequested)
         {
             Update();
             Draw();

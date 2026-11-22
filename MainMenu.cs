@@ -14,8 +14,9 @@ public class MainMenu
     private const float PeakDecay = 0.995f;
     private const float BassFilter = 0.02f;
     private const float LogoHeightRatio = 0.4f;
+    private const float LogoOpenHeightRatio = 0.22f;
     private const float LogoClosedX = 0.5f;
-    private const float LogoOpenX = 0.16f;
+    private const float LogoOpenX = 0.25f;
     private const float OpenSpeed = 10f;
 
     private bool menuOpen;
@@ -28,9 +29,34 @@ public class MainMenu
     private float hoverBlend;
     private float logoScale = 1f;
 
+    private const float BarHeightRatio = 0.14f;
+    private const float BarOpacity = 0.6f;
+
+    private const float ButtonAspect = 2.2f;
+    private const float ButtonGapRatio = 0.12f;
+    private const float ButtonsMarginRatio = 0.025f;
+
+    private readonly List<MenuButton> buttons;
+    private readonly MenuButton settingsButton;
+    public bool ExitRequested { get; private set; }
+
+    private Font font;
     private Texture2D background;
     private Texture2D logo;
     private Music music;
+
+    public MainMenu()
+    {
+        settingsButton = new MenuButton("Settings", "icons/settings.png", new Color(92, 87, 85, 255), null);
+
+        buttons = new List<MenuButton>
+        {
+            new MenuButton("Play", "icons/play.png", new Color(168, 230, 207, 255), null),
+            new MenuButton("Editor", "icons/editor.png", new Color(169, 214, 245, 255), null),
+            new MenuButton("Account", "icons/account.png", new Color(255, 201, 168, 255), null),
+            new MenuButton("Exit", "icons/exit.png", new Color(244, 169, 184, 255), () => ExitRequested = true)
+        };
+    }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static unsafe void AnalyzeAudio(void* bufferData, uint frames)
@@ -48,18 +74,55 @@ public class MainMenu
         bassEnergy = MathF.Sqrt(sum / frames);
     }
 
+    private void LayoutButtons()
+    {
+        float screenWidth = Raylib.GetScreenWidth();
+        float screenHeight = Raylib.GetScreenHeight();
+        float height = screenHeight * BarHeightRatio;
+        float slant = height * MenuButton.SlantRatio;
+        float gap = height * ButtonGapRatio;
+        float top = (screenHeight - height) / 2f;
+        float slide = (1f - openBlend) * screenWidth * 0.04f;
+
+        float logoCenterX = screenWidth * LogoOpenX;
+        float logoRadius = screenHeight * LogoOpenHeightRatio / 2f;
+
+        float start = logoCenterX + logoRadius + screenWidth * ButtonsMarginRatio;
+        float available = screenWidth - start - screenWidth * ButtonsMarginRatio;
+        float width = MathF.Min(height * ButtonAspect, (available + (buttons.Count - 1) * (slant - gap)) / buttons.Count);
+        float step = width - slant + gap;
+
+        for (int i = 0; i < buttons.Count; i++)
+        {
+            buttons[i].Bounds = new Rectangle(start + slide + i * step, top, width, height);
+        }
+
+        float settingsWidth = width + logoRadius;
+        settingsButton.HiddenRight = logoRadius;
+        settingsButton.Bounds = new Rectangle(logoCenterX - settingsWidth + slide, top, settingsWidth, height);
+    }
+
     public unsafe void Load()
     {
         int index = Random.Shared.Next(1, 4);
         background = Raylib.LoadTexture(AssetPath($"main-menu/{index}.png"));
         logo = Raylib.LoadTexture(AssetPath("logo.png"));
+        font = Raylib.LoadFontEx(AssetPath("fonts/ui.ttf"), 64, null, 0);
         Raylib.SetTextureFilter(background, TextureFilter.Bilinear);
         Raylib.SetTextureFilter(logo, TextureFilter.Bilinear);
+        Raylib.SetTextureFilter(font.Texture, TextureFilter.Bilinear);
 
         music = Raylib.LoadMusicStream(AssetPath("main-menu/music.mp3"));
         music.Looping = true;
         Raylib.PlayMusicStream(music);
         Raylib.AttachAudioMixedProcessor(&AnalyzeAudio);
+
+        settingsButton.Load();
+
+        foreach (MenuButton button in buttons)
+        {
+            button.Load();
+        }
     }
 
     public unsafe void Unload()
@@ -68,9 +131,17 @@ public class MainMenu
         Raylib.UnloadTexture(background);
         Raylib.UnloadTexture(logo);
         Raylib.UnloadMusicStream(music);
+        Raylib.UnloadFont(font);
+
+        settingsButton.Unload();
+
+        foreach (MenuButton button in buttons)
+        {
+            button.Unload();
+        }
     }
 
-    private static string AssetPath(string relativePath)
+    public static string AssetPath(string relativePath)
     {
         return Path.Combine(AppContext.BaseDirectory, "Assets", relativePath);
     }
@@ -78,6 +149,8 @@ public class MainMenu
     public void Draw()
     {
         DrawBackground();
+        DrawBar();
+        DrawButtons();
         DrawLogo();
     }
 
@@ -94,12 +167,29 @@ public class MainMenu
         Raylib.DrawTexturePro(background, source, destination, Vector2.Zero, 0f, Color.White);
     }
 
+    private void DrawBar()
+    {
+        float screenHeight = Raylib.GetScreenHeight();
+        float height = screenHeight * BarHeightRatio * openBlend;
+        float top = (screenHeight - height) / 2f;
+        byte opacity = (byte)(255 * BarOpacity * openBlend);
+        Color barColor = new((byte)255, (byte)255, (byte)255, opacity);
+        Raylib.DrawRectangle(0, (int)top, Raylib.GetScreenWidth(), (int)height, barColor);
+    }
+
     public void Update()
     {
         Raylib.UpdateMusicStream(music);
 
         float deltaTime = Raylib.GetFrameTime();
         bool hovering = IsMouseOverLogo();
+
+        if (hovering && Raylib.IsMouseButtonPressed(MouseButton.Left))
+        {
+            menuOpen = !menuOpen;
+        }
+
+        openBlend += ((menuOpen ? 1f : 0f) - openBlend) * MathF.Min(1f, OpenSpeed * deltaTime);
 
         UpdatePulse(deltaTime);
 
@@ -108,6 +198,31 @@ public class MainMenu
 
         float pulseScale = 1f + PulseStrength * pulse;
         logoScale = pulseScale + (HoverScale - pulseScale) * hoverBlend;
+
+        LayoutButtons();
+
+        bool interactive = menuOpen && !hovering;
+        settingsButton.Update(deltaTime, interactive);
+
+        foreach (MenuButton button in buttons)
+        {
+            button.Update(deltaTime, interactive);
+        }
+    }
+
+    private void DrawButtons()
+    {
+        if (openBlend < 0.01f)
+        {
+            return;
+        }
+
+        settingsButton.Draw(font, openBlend);
+
+        foreach (MenuButton button in buttons)
+        {
+            button.Draw(font, openBlend);
+        }
     }
 
     private void UpdatePulse(float deltaTime)
@@ -120,18 +235,22 @@ public class MainMenu
 
     private float BaseLogoSize()
     {
-        return Raylib.GetScreenHeight() * LogoHeightRatio;
+        float screenHeight = Raylib.GetScreenHeight();
+        float closedSize = screenHeight * LogoHeightRatio;
+        float openSize = screenHeight * LogoOpenHeightRatio;
+        return closedSize + (openSize - closedSize) * openBlend;
     }
 
-    private Vector2 ScreenCenter()
+    private Vector2 LogoCenter()
     {
-        return new Vector2(Raylib.GetScreenWidth() / 2f, Raylib.GetScreenHeight() / 2f);
+        float closedX = Raylib.GetScreenWidth() * LogoClosedX;
+        float openX = Raylib.GetScreenWidth() * LogoOpenX;
+        return new Vector2(closedX + (openX - closedX) * openBlend, Raylib.GetScreenHeight() / 2f);
     }
-
     private void DrawLogo()
     {
         float size = BaseLogoSize() * logoScale;
-        Vector2 center = ScreenCenter();
+        Vector2 center = LogoCenter();
         Rectangle source = new(0, 0, logo.Width, logo.Height);
         Rectangle destination = new(center.X, center.Y, size, size);
         Vector2 origin = new(size / 2f, size / 2f);
@@ -141,6 +260,6 @@ public class MainMenu
     private bool IsMouseOverLogo()
     {
         float radius = BaseLogoSize() / 2f;
-        return Vector2.Distance(Raylib.GetMousePosition(), ScreenCenter()) <= radius;
+        return Vector2.Distance(Raylib.GetMousePosition(), LogoCenter()) <= radius;
     }
 }
