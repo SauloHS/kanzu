@@ -14,6 +14,12 @@ public class MainMenu
     private const float PeakDecay = 0.995f;
     private const float BassFilter = 0.02f;
     private const float LogoHeightRatio = 0.4f;
+    private const float LogoClosedX = 0.5f;
+    private const float LogoOpenX = 0.16f;
+    private const float OpenSpeed = 10f;
+
+    private bool menuOpen;
+    private float openBlend; // 0 = closed, 1 = openBlend
 
     private static volatile float bassEnergy;
     private static float lowPassState;
