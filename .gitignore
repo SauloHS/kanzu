@@ -24,4 +24,6 @@ Desktop.ini
 *.log
 *.cache
 
+*.local
+
 unpacked/

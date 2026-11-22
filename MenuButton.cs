@@ -12,7 +12,6 @@ public class MenuButton
     private const float FontRatio = 0.22f;
     private const float IconRatio = 0.45f;
     private const float ContentGapRatio = 0.06f;
-    private const float Spacing = 1f;
 
     private readonly string label;
     private readonly string iconPath;
@@ -70,7 +69,7 @@ public class MenuButton
         return point.X >= left && point.X <= right;
     }
 
-    public void Draw(Font font, float alpha)
+    public void Draw(float alpha)
     {
         Rectangle area = Scaled(Bounds, 1f + HoverGrow * hoverBlend);
         float slant = area.Height * SlantRatio;
@@ -89,7 +88,7 @@ public class MenuButton
         float fontSize = area.Height * FontRatio;
         float iconSize = area.Height * IconRatio;
         float gap = area.Height * ContentGapRatio;
-        Vector2 textSize = Raylib.MeasureTextEx(font, label, fontSize, Spacing);
+        Vector2 textSize = AppFont.Measure(label, fontSize);
 
         float groupHeight = iconSize + gap + textSize.Y;
         float top = area.Y + (area.Height - groupHeight) / 2f;
@@ -100,7 +99,7 @@ public class MenuButton
         Raylib.DrawTexturePro(icon, iconSource, iconTarget, Vector2.Zero, 0f, white);
 
         Vector2 textPosition = new(centerX - textSize.X / 2f, top + iconSize + gap);
-        Raylib.DrawTextEx(font, label, textPosition, fontSize, Spacing, white);
+        AppFont.Draw(label, textPosition, fontSize, white);
     }
 
     private static Rectangle Scaled(Rectangle rectangle, float scale)

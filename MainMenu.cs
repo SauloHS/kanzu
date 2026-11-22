@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Kanzu;
 
-public class MainMenu
+public class MainMenu : IScreen
 {
     private const float PulseStrength = 0.25f;
     private const float HoverScale = 1.55f;
@@ -38,23 +38,25 @@ public class MainMenu
 
     private readonly List<MenuButton> buttons;
     private readonly MenuButton settingsButton;
-    public bool ExitRequested { get; private set; }
+    private readonly Game game;
 
-    private Font font;
     private Texture2D background;
     private Texture2D logo;
     private Music music;
 
-    public MainMenu()
+    public MainMenu(Game game, bool startOpen = false)
     {
+        this.game = game;
+        menuOpen = startOpen;
+        openBlend = startOpen ? 1f : 0f;
         settingsButton = new MenuButton("Settings", "icons/settings.png", new Color(92, 87, 85, 255), null);
 
         buttons = new List<MenuButton>
         {
             new MenuButton("Play", "icons/play.png", new Color(168, 230, 207, 255), null),
-            new MenuButton("Editor", "icons/editor.png", new Color(169, 214, 245, 255), null),
+            new MenuButton("Editor", "icons/editor.png", new Color(169, 214, 245, 255), () => game.ChangeScreen(new EditorScreen(game))),
             new MenuButton("Account", "icons/account.png", new Color(255, 201, 168, 255), null),
-            new MenuButton("Exit", "icons/exit.png", new Color(244, 169, 184, 255), () => ExitRequested = true)
+            new MenuButton("Exit", "icons/exit.png", new Color(244, 169, 184, 255), () => game.Exit())
         };
     }
 
@@ -107,10 +109,8 @@ public class MainMenu
         int index = Random.Shared.Next(1, 4);
         background = Raylib.LoadTexture(AssetPath($"main-menu/{index}.png"));
         logo = Raylib.LoadTexture(AssetPath("logo.png"));
-        font = Raylib.LoadFontEx(AssetPath("fonts/ui.ttf"), 64, null, 0);
         Raylib.SetTextureFilter(background, TextureFilter.Bilinear);
         Raylib.SetTextureFilter(logo, TextureFilter.Bilinear);
-        Raylib.SetTextureFilter(font.Texture, TextureFilter.Bilinear);
 
         music = Raylib.LoadMusicStream(AssetPath("main-menu/music.mp3"));
         music.Looping = true;
@@ -131,7 +131,6 @@ public class MainMenu
         Raylib.UnloadTexture(background);
         Raylib.UnloadTexture(logo);
         Raylib.UnloadMusicStream(music);
-        Raylib.UnloadFont(font);
 
         settingsButton.Unload();
 
@@ -217,11 +216,11 @@ public class MainMenu
             return;
         }
 
-        settingsButton.Draw(font, openBlend);
+        settingsButton.Draw(openBlend);
 
         foreach (MenuButton button in buttons)
         {
-            button.Draw(font, openBlend);
+            button.Draw(openBlend);
         }
     }
 
