@@ -30,6 +30,7 @@ internal static class NativeEditorSmoke
             var empty = new EditorScreen(game);
             Set(empty, "storageRoot", root);
             empty.Load();
+            VerifyDownloadControls(empty, root);
             Capture(empty, Path.Combine(outputDirectory, "setup-new.png"));
             Call(empty, "RequestExit");
             Capture(empty, Path.Combine(outputDirectory, "save-popup.png"));
@@ -114,6 +115,90 @@ internal static class NativeEditorSmoke
             Raylib.CloseWindow();
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static void VerifyDownloadControls(EditorScreen editor, string root)
+    {
+        EditorButton button = Get<EditorButton>(editor, "importButton");
+        TextField id = Get<TextField>(editor, "idField");
+        TextField title = Get<TextField>(editor, "titleField");
+        TextField artist = Get<TextField>(editor, "artistField");
+        Require(button.Label == "Download audio", "Download is the default audio action.");
+        Require(!button.Enabled, "Download requires a valid audio ID.");
+        id.Text = "123";
+        Call(editor, "UpdateAudioId");
+        Call(editor, "UpdateValidation");
+        Require(button.Enabled, "A valid ID enables downloading.");
+        for (int frame = 0; frame < 120; frame++)
+        {
+            editor.Update();
+        }
+
+        Require(Get<Task<ImportedAudio>?>(editor, "importTask") == null,
+            "Entering an ID and waiting never starts a download.");
+        Set(editor, "downloadingAudio", true);
+        Set(editor, "importingId", 123L);
+        Set(editor, "importTask", Task.FromException<ImportedAudio>(new SongDownloadException(400)));
+        Call(editor, "UpdateValidation");
+        Require(button.Label == "Downloading..." && !button.Enabled, "Download action is disabled while downloading.");
+        Call(editor, "CompleteImport");
+        Call(editor, "UpdateValidation");
+        Require(button.Label == "Choose audio file" && button.Enabled,
+            "Manual import appears only after downloading fails.");
+        id.Text = "456";
+        Call(editor, "UpdateAudioId");
+        Call(editor, "UpdateValidation");
+        Require(button.Label == "Download audio", "Changing the ID clears the manual fallback.");
+
+        string source = Path.Combine(root, "metadata.ogg");
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "Assets", "sfx", "click.ogg"), source);
+        using (var taggedFile = TagLib.File.Create(source))
+        {
+            taggedFile.Tag.Title = "Fixture Song (ID: 456)";
+            taggedFile.Tag.Performers = ["Fixture Artist"];
+            taggedFile.Save();
+        }
+
+        Call(editor, "BeginImport");
+        Set(editor, "downloadingAudio", true);
+        Set(editor, "importTask", LocalAudio.ImportAsync(source, Path.Combine(root, "MetadataAudio")));
+        Get<Task<ImportedAudio>>(editor, "importTask").GetAwaiter().GetResult();
+        Call(editor, "CompleteImport");
+        Call(editor, "UpdateValidation");
+        Require(title.Text == "Fixture Song", "Downloaded title populates without the Newgrounds ID suffix.");
+        Require(artist.Text == "Fixture Artist", "Downloaded artist populates from embedded tags.");
+        Require(button.Label == "Download audio", "A successful download does not expose manual import.");
+        Require(Get<bool>(editor, "hasMusic"), "Downloaded audio supports preview.");
+
+        Call(editor, "BeginImport");
+        Set(editor, "downloadingAudio", true);
+        Set(editor, "importTask", LocalAudio.ImportAsync(source, Path.Combine(root, "MetadataAudio")));
+        title.Text = "User title";
+        artist.Text = "User artist";
+        Get<Task<ImportedAudio>>(editor, "importTask").GetAwaiter().GetResult();
+        Call(editor, "CompleteImport");
+        Require(title.Text == "User title" && artist.Text == "User artist",
+            "Download completion preserves text edited while downloading.");
+
+        Call(editor, "BeginImport");
+        Set(editor, "downloadingAudio", true);
+        var oldDownload = new TaskCompletionSource<ImportedAudio>();
+        Set(editor, "importTask", oldDownload.Task);
+        id.Text = "789";
+        Call(editor, "UpdateAudioId");
+        oldDownload.SetResult(new ImportedAudio("456.mp3", new string('a', 64), source, 1, false)
+        {
+            Title = "Old Song (ID: 456)", Artist = "Old Artist"
+        });
+        Call(editor, "CompleteImport");
+        Require(title.Text == "User title" && artist.Text == "User artist",
+            "A stale download cannot overwrite the newer ID's fields.");
+        id.Text = "";
+        title.Text = "";
+        artist.Text = "";
+        Call(editor, "UpdateAudioId");
+        Call(editor, "UpdateValidation");
+        Console.WriteLine("PASS: native download controls, failure fallback, metadata autofill, and stale-download isolation.");
     }
 
     private static void Pump(IScreen screen)

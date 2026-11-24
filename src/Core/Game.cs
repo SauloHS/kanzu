@@ -14,11 +14,9 @@ public class Game
     public void Run()
     {
         Raylib.InitWindow(Width, Height, "Kanzu");
+        ConfigureWindow();
         AppFont.Load();
         Raylib.SetExitKey(KeyboardKey.Null);
-        Raylib.ToggleBorderlessWindowed();
-        Raylib.ClearWindowState(ConfigFlags.TopmostWindow);
-        Raylib.SetWindowFocused();
         LoadWindowIcon();
         Raylib.InitAudioDevice();
         Sfx.Load();
@@ -37,6 +35,16 @@ public class Game
         Sfx.Unload();
         Raylib.CloseAudioDevice();
         Raylib.CloseWindow();
+    }
+
+    private void ConfigureWindow()
+    {
+        int monitor = Raylib.GetCurrentMonitor();
+        var position = Raylib.GetMonitorPosition(monitor);
+        Raylib.SetWindowState(ConfigFlags.UndecoratedWindow);
+        Raylib.SetWindowSize(Raylib.GetMonitorWidth(monitor), Raylib.GetMonitorHeight(monitor));
+        Raylib.SetWindowPosition((int)position.X, (int)position.Y);
+        Raylib.ClearWindowState(ConfigFlags.TopmostWindow);
     }
 
     private void Update()

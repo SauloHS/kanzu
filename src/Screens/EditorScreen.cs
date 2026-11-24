@@ -16,7 +16,7 @@ public class EditorScreen : IScreen
     private readonly TextField videoField = new("https://...", 512);
     private readonly TextField idField = new("Audio ID", 19) { DigitsOnly = true };
     private readonly EditorButton pageButton = new("Open Newgrounds page");
-    private readonly EditorButton importButton = new("Choose audio file");
+    private readonly EditorButton importButton = new("Download audio");
     private readonly EditorButton previewButton = new("Preview audio");
     private readonly EditorButton copyButton = new("Copy hash");
     private readonly MenuButton[] exitButtons;
@@ -51,6 +51,10 @@ public class EditorScreen : IScreen
     private bool dropHovered;
     private string expectedAudioHash = "";
     private bool restoringAudio;
+    private bool downloadingAudio;
+    private bool downloadFailed;
+    private string titleBeforeImport = "";
+    private string artistBeforeImport = "";
     private int keyboardFocus = -1;
     private object[] focusOrder = [];
 
@@ -93,6 +97,8 @@ public class EditorScreen : IScreen
         {
             button.Load();
         }
+
+        UpdateValidation();
     }
 
     public void Unload()
@@ -159,7 +165,7 @@ public class EditorScreen : IScreen
 
         if (importButton.Update())
         {
-            ChooseAudio();
+            AcquireAudio();
         }
 
         if (previewButton.Update())
@@ -187,7 +193,7 @@ public class EditorScreen : IScreen
             {
                 importError = "Drop one MP3, OGG, or WAV file at a time.";
             }
-            else
+            else if (downloadFailed)
             {
                 StartImport(files[0]);
             }
@@ -323,20 +329,34 @@ public class EditorScreen : IScreen
             return;
         }
 
-        bool hadAudio = importedAudio != null || importTask != null;
         selectedId = id;
         expectedAudioHash = "";
         restoringAudio = false;
         CancelImport();
         UnloadAudio();
         importedAudio = null;
-        importError = hadAudio ? "Audio ID changed. Import the original song again." : "";
+        importError = "";
         footerMessage = "";
+        downloadFailed = false;
+    }
+
+    private void StartDownload()
+    {
+        if (selectedId <= 0)
+        {
+            return;
+        }
+
+        BeginImport();
+        downloadFailed = false;
+        downloadingAudio = true;
+        importTask = NewgroundsDownloader.DownloadAsync(selectedId, Path.Combine(storageRoot, "Audio"),
+            importCancellation!.Token);
     }
 
     private void UpdateDropHover()
     {
-        bool hovering = Raylib.IsWindowFocused() &&
+        bool hovering = downloadFailed && Raylib.IsWindowFocused() &&
             Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), dropArea) &&
             !Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), importButton.Bounds);
         if (hovering && !dropHovered)
@@ -348,7 +368,7 @@ public class EditorScreen : IScreen
         if (hovering && Raylib.IsMouseButtonPressed(MouseButton.Left) && importButton.Enabled)
         {
             Sfx.PlayClick();
-            ChooseAudio();
+            AcquireAudio();
         }
     }
 
@@ -381,6 +401,17 @@ public class EditorScreen : IScreen
         }
     }
 
+    private void AcquireAudio()
+    {
+        if (downloadFailed)
+        {
+            ChooseAudio();
+            return;
+        }
+
+        StartDownload();
+    }
+
     private void ChooseAudio()
     {
         try
@@ -411,6 +442,12 @@ public class EditorScreen : IScreen
             return;
         }
 
+        BeginImport();
+        importTask = LocalAudio.ImportAsync(path, Path.Combine(storageRoot, "Audio"), importCancellation!.Token);
+    }
+
+    private void BeginImport()
+    {
         CancelImport();
         UnloadAudio();
         restoringAudio = false;
@@ -418,12 +455,14 @@ public class EditorScreen : IScreen
         importError = "";
         footerMessage = "";
         importingId = selectedId;
+        titleBeforeImport = titleField.Text;
+        artistBeforeImport = artistField.Text;
         importCancellation = new CancellationTokenSource();
-        importTask = LocalAudio.ImportAsync(path, Path.Combine(storageRoot, "Audio"), importCancellation.Token);
     }
 
     private void CancelImport()
     {
+        downloadingAudio = false;
         importCancellation?.Cancel();
         importCancellation?.Dispose();
         importCancellation = null;
@@ -443,6 +482,8 @@ public class EditorScreen : IScreen
         }
 
         Task<ImportedAudio> completed = importTask;
+        bool wasDownloading = downloadingAudio;
+        downloadingAudio = false;
         importTask = null;
         importCancellation?.Dispose();
         importCancellation = null;
@@ -457,6 +498,7 @@ public class EditorScreen : IScreen
             if (NewgroundsAudio.IsValidHash(expectedAudioHash) &&
                 !NewgroundsAudio.MatchesHash(expectedAudioHash, result.Sha256))
             {
+                downloadFailed |= wasDownloading;
                 importError = "Audio does not match this project's hash. Import the original file.";
                 return;
             }
@@ -476,23 +518,50 @@ public class EditorScreen : IScreen
                     File.Delete(result.LocalPath);
                 }
 
+                downloadFailed |= wasDownloading;
                 importError = "This file could not be decoded. Import the original download, not a renamed or converted file.";
                 return;
             }
 
+            downloadFailed = false;
             music = candidate;
             hasMusic = true;
             duration = seconds;
             importedAudio = restoringAudio ? result with { FileName = "Cached audio" } : result;
+            if (!restoringAudio)
+            {
+                ApplyAudioMetadata(result, wasDownloading);
+            }
+
             Raylib.SetMusicVolume(music, 0.65f);
         }
         catch (OperationCanceledException)
         {
-            importError = "Import canceled. Choose the audio file again.";
+            downloadFailed |= wasDownloading;
+            importError = "Audio import canceled. Try again.";
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or Win32Exception)
         {
-            importError = "Import failed. Check that the file is readable and try again. " + error.Message;
+            downloadFailed |= wasDownloading;
+            importError = wasDownloading
+                ? "Automatic download failed. Open the Newgrounds page and import the file manually. " + error.Message
+                : "Import failed. Check that the file is readable and try again. " + error.Message;
+        }
+    }
+
+    private void ApplyAudioMetadata(ImportedAudio audio, bool downloaded)
+    {
+        string title = NewgroundsAudio.CleanTitle(audio.Title, selectedId);
+        if (title.Length > 0 && titleField.Text == titleBeforeImport &&
+            (downloaded || string.IsNullOrWhiteSpace(titleField.Text)))
+        {
+            titleField.Text = title[..Math.Min(title.Length, 100)];
+        }
+
+        if (audio.Artist.Length > 0 && artistField.Text == artistBeforeImport &&
+            (downloaded || string.IsNullOrWhiteSpace(artistField.Text)))
+        {
+            artistField.Text = audio.Artist[..Math.Min(audio.Artist.Length, 100)];
         }
     }
 
@@ -553,7 +622,8 @@ public class EditorScreen : IScreen
         BeatmapDraft draft = BuildDraft();
         pageButton.Enabled = selectedId > 0;
         importButton.Enabled = selectedId > 0 && importTask == null;
-        importButton.Label = importedAudio == null ? "Choose audio file" : "Replace audio file";
+        importButton.Label = downloadingAudio ? "Downloading..."
+            : downloadFailed ? "Choose audio file" : "Download audio";
         previewButton.Enabled = hasMusic && importTask == null;
         copyButton.Enabled = NewgroundsAudio.IsValidHash(importedAudio?.Sha256 ?? expectedAudioHash);
         nameField.Invalid = showValidation && string.IsNullOrWhiteSpace(draft.Name);
@@ -813,7 +883,9 @@ public class EditorScreen : IScreen
         Raylib.DrawRectangleRoundedLinesEx(dropArea, EditorTheme.Roundness(dropArea, 6f * scale), 12,
             dropHighlighted ? 2f * scale : scale, dropHighlighted ? EditorTheme.Accent : EditorTheme.Border);
         importButton.Draw(scale);
-        string dropText = importTask != null ? "Calculating SHA-256..." : "or drop an MP3, OGG, or WAV";
+        string dropText = downloadingAudio ? "Downloading from Newgrounds..."
+            : importTask != null ? "Calculating SHA-256..."
+            : downloadFailed ? "or drop an MP3, OGG, or WAV" : "Audio downloads from Newgrounds";
         DrawCentered(dropText, new Rectangle(dropArea.X, dropArea.Y + 56f * scale, dropArea.Width, 20f * scale),
             13f * scale, EditorTheme.SecondaryText);
 
@@ -824,8 +896,9 @@ public class EditorScreen : IScreen
         }
         else if (importedAudio == null)
         {
-            AppFont.Draw(importTask == null ? "No audio imported" : "Reading the original audio file",
-                new Vector2(x, statusY), 16f * scale, Color.White);
+            string status = downloadingAudio ? "Downloading from Newgrounds"
+                : importTask != null ? "Reading the audio file" : "No audio imported";
+            AppFont.Draw(status, new Vector2(x, statusY), 16f * scale, Color.White);
         }
         else
         {

@@ -1,9 +1,33 @@
-namespace Kanzu;
-
+using System.Globalization;
 using System.Text.Json.Serialization;
+
+namespace Kanzu;
 
 public sealed record NewgroundsAudio(long Id, string Sha256)
 {
+    [JsonIgnore]
+    public string DownloadUrl
+    {
+        get
+        {
+            if (Id <= 0)
+            {
+                throw new ArgumentException("Invalid Newgrounds audio ID: must be positive", nameof(Id));
+            }
+
+            return $"https://www.newgrounds.com/audio/download/{Id.ToString(CultureInfo.InvariantCulture)}";
+        }
+    }
+
+    public static string CleanTitle(string title, long id)
+    {
+        title = title.Trim();
+        string suffix = $"(ID: {id.ToString(CultureInfo.InvariantCulture)})";
+        return title.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+            ? title[..^suffix.Length].TrimEnd()
+            : title;
+    }
+
     [JsonIgnore]
     public string PageUrl
     {

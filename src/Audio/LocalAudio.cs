@@ -1,8 +1,6 @@
 namespace Kanzu;
 
-using System.IO;
 using System.Security.Cryptography;
-using System.Text;
 
 public sealed record ImportedAudio(
     string FileName,
@@ -10,7 +8,11 @@ public sealed record ImportedAudio(
     string LocalPath,
     long SizeBytes,
     bool CreatedCacheFile
-);
+)
+{
+    public string Title { get; init; } = "";
+    public string Artist { get; init; } = "";
+}
 
 public static class LocalAudio
 {
@@ -19,6 +21,23 @@ public static class LocalAudio
     {
         ".mp3", ".ogg", ".wav"
     };
+
+    private static ImportedAudio ReadMetadata(ImportedAudio audio)
+    {
+        try
+        {
+            using var file = TagLib.File.Create(audio.LocalPath, TagLib.ReadStyle.None);
+            return audio with
+            {
+                Title = file.Tag.Title?.Trim() ?? "",
+                Artist = file.Tag.JoinedPerformers?.Trim() ?? ""
+            };
+        }
+        catch (Exception error) when (error is TagLib.CorruptFileException or TagLib.UnsupportedFormatException)
+        {
+            return audio;
+        }
+    }
 
     public static bool IsSupportedFile(string path)
     {
@@ -108,13 +127,13 @@ public static class LocalAudio
                     if (string.Equals(existingHash, hash, StringComparison.Ordinal))
                     {
                         File.Delete(tempPath);
-                        return new ImportedAudio(sourceInfo.Name, hash, finalPath, copiedBytes, false);
+                        return ReadMetadata(new ImportedAudio(sourceInfo.Name, hash, finalPath, copiedBytes, false));
                     }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
                 File.Move(tempPath, finalPath, true);
-                return new ImportedAudio(sourceInfo.Name, hash, finalPath, copiedBytes, true);
+                return ReadMetadata(new ImportedAudio(sourceInfo.Name, hash, finalPath, copiedBytes, true));
             }
             finally
             {

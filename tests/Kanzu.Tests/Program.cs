@@ -11,6 +11,26 @@ if (args.Length == 2 && args[0] == "--native")
     return;
 }
 
+if (args.Length == 3 && args[0] == "--download")
+{
+    long songId = long.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
+    try
+    {
+        ImportedAudio audio = await NewgroundsDownloader.DownloadAsync(songId, args[2]);
+        Console.WriteLine($"Downloaded: {audio.FileName}");
+        Console.WriteLine($"Title: {NewgroundsAudio.CleanTitle(audio.Title, songId)}");
+        Console.WriteLine($"Artist: {audio.Artist}");
+        Console.WriteLine($"SHA-256: {audio.Sha256}");
+    }
+    catch (SongDownloadException error)
+    {
+        Console.WriteLine(error.Message);
+        Environment.ExitCode = 1;
+    }
+
+    return;
+}
+
 var passCount = 0;
 var failCount = 0;
 
@@ -115,6 +135,29 @@ var audio1 = new NewgroundsAudio(123, new string('a', 64));
 AssertEqual("valid positive id", "https://www.newgrounds.com/audio/listen/123", audio1.PageUrl);
 AssertThrows<ArgumentException>("zero id throws", () => { var _ = new NewgroundsAudio(0, new string('a', 64)).PageUrl; });
 AssertThrows<ArgumentException>("negative id throws", () => { var _ = new NewgroundsAudio(-1, new string('a', 64)).PageUrl; });
+
+Console.WriteLine("DownloadUrl:");
+AssertEqual("download uses official endpoint", "https://www.newgrounds.com/audio/download/123", audio1.DownloadUrl);
+AssertThrows<ArgumentException>("zero download id throws", () => { var _ = new NewgroundsAudio(0, "").DownloadUrl; });
+AssertThrows<ArgumentException>("negative download id throws", () => { var _ = new NewgroundsAudio(-1, "").DownloadUrl; });
+Assert("download URL is not serialized", !JsonSerializer.Serialize(audio1).Contains("DownloadUrl"));
+AssertThrows<ArgumentException>("invalid id cannot start download",
+    () => NewgroundsDownloader.DownloadAsync(0, Path.GetTempPath()).GetAwaiter().GetResult());
+using (var canceledDownload = new CancellationTokenSource())
+{
+    canceledDownload.Cancel();
+    AssertThrows<OperationCanceledException>("canceled download does not start curl",
+        () => NewgroundsDownloader.DownloadAsync(123, Path.GetTempPath(), canceledDownload.Token).GetAwaiter().GetResult());
+}
+
+Console.WriteLine("CleanTitle:");
+AssertEqual("Newgrounds ID suffix removed", "Test Song", NewgroundsAudio.CleanTitle("Test Song (ID: 123)", 123));
+AssertEqual("title whitespace trimmed", "Test Song", NewgroundsAudio.CleanTitle("  Test Song  (ID: 123)  ", 123));
+AssertEqual("suffix matching is case insensitive", "Test Song", NewgroundsAudio.CleanTitle("Test Song (id: 123)", 123));
+AssertEqual("plain title unchanged", "Test Song", NewgroundsAudio.CleanTitle("Test Song", 123));
+AssertEqual("different ID suffix preserved", "Test Song (ID: 456)", NewgroundsAudio.CleanTitle("Test Song (ID: 456)", 123));
+AssertEqual("ID inside title preserved", "Test (ID: 123) Remix", NewgroundsAudio.CleanTitle("Test (ID: 123) Remix", 123));
+AssertEqual("empty title supported", "", NewgroundsAudio.CleanTitle("", 123));
 
 Console.WriteLine("\n=== LocalAudio Tests ===");
 
@@ -281,6 +324,31 @@ try
     var mismatchHash2 = ComputeSha256Hex(mismatchBytes2);
     AssertEqual("second import hash matches new content", mismatchHash2, importedMismatch2.Sha256);
     Assert("created cache file true on content change", importedMismatch2.CreatedCacheFile);
+
+    Console.WriteLine("ImportAsync - embedded metadata:");
+    string taggedPath = Path.Combine(sourceDir, "tagged.mp3");
+    File.Copy(Path.Combine(AppContext.BaseDirectory, "Assets", "main-menu", "music.mp3"), taggedPath);
+    using (var taggedFile = TagLib.File.Create(taggedPath))
+    {
+        taggedFile.Tag.Title = "Café Song (ID: 123)";
+        taggedFile.Tag.Performers = ["Test Artist"];
+        taggedFile.Save();
+    }
+
+    string taggedHash = await LocalAudio.ComputeHashAsync(taggedPath);
+    ImportedAudio taggedAudio = await LocalAudio.ImportAsync(taggedPath, cacheDir);
+    AssertEqual("embedded MP3 title read", "Café Song (ID: 123)", taggedAudio.Title);
+    AssertEqual("embedded MP3 artist read", "Test Artist", taggedAudio.Artist);
+    AssertEqual("embedded title cleaned", "Café Song", NewgroundsAudio.CleanTitle(taggedAudio.Title, 123));
+    AssertEqual("metadata reading preserves original hash", taggedHash, taggedAudio.Sha256);
+    AssertEqual("metadata reading leaves source unchanged", taggedHash, await LocalAudio.ComputeHashAsync(taggedPath));
+    AssertEqual("metadata reading leaves cache unchanged", taggedHash, await LocalAudio.ComputeHashAsync(taggedAudio.LocalPath));
+    ImportedAudio reusedAudio = await LocalAudio.ImportAsync(taggedPath, cacheDir);
+    AssertEqual("reused cache keeps title", taggedAudio.Title, reusedAudio.Title);
+    AssertEqual("reused cache keeps artist", taggedAudio.Artist, reusedAudio.Artist);
+    Assert("reused tagged audio does not duplicate cache", !reusedAudio.CreatedCacheFile);
+    AssertEqual("invalid audio has no title", "", importedMismatch2.Title);
+    AssertEqual("invalid audio has no artist", "", importedMismatch2.Artist);
 }
 finally
 {
@@ -814,7 +882,10 @@ try
 {
     var first = new BeatmapDraft
     {
-        Name = "Delete me", SongTitle = "Song", Artist = "Artist", RequestedStars = 4,
+        Name = "Delete me",
+        SongTitle = "Song",
+        Artist = "Artist",
+        RequestedStars = 4,
         Audio = new NewgroundsAudio(1, new string('a', 64))
     };
     string selectedPath = first.Save(deleteDirectory);
