@@ -17,9 +17,11 @@ public class Game
         AppFont.Load();
         Raylib.SetExitKey(KeyboardKey.Null);
         Raylib.ToggleBorderlessWindowed();
+        Raylib.ClearWindowState(ConfigFlags.TopmostWindow);
         Raylib.SetWindowFocused();
         LoadWindowIcon();
         Raylib.InitAudioDevice();
+        Sfx.Load();
         currentScreen = new MainMenu(this);
         currentScreen.Load();
         cursor.Load();
@@ -32,6 +34,7 @@ public class Game
         currentScreen.Unload();
         cursor.Unload();
         AppFont.Unload();
+        Sfx.Unload();
         Raylib.CloseAudioDevice();
         Raylib.CloseWindow();
     }

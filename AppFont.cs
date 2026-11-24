@@ -11,10 +11,15 @@ public static class AppFont
 
     public static void Load()
     {
-        Current = Raylib.LoadFontEx(MainMenu.AssetPath("fonts/ui.ttf"), 64, null, 0);
+        int[] codepoints = Enumerable.Range(32, 224).ToArray();
+        Current = Raylib.LoadFontEx(MainMenu.AssetPath("fonts/ui.ttf"), 64, codepoints, codepoints.Length);
         Raylib.SetTextureFilter(Current.Texture, TextureFilter.Bilinear);
     }
 
+    public static bool Supports(int codepoint)
+    {
+        return (codepoint >= 32 && codepoint <= 126) || (codepoint >= 160 && codepoint <= 255);
+    }
     public static void Unload()
     {
         Raylib.UnloadFont(Current);

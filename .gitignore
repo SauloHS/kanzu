@@ -24,6 +24,11 @@ Desktop.ini
 *.log
 *.cache
 
+# Local-only files
 *.local
+.impeccable/
+
+# Yes, I used AI.
+.claude/
 
 unpacked/

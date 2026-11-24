@@ -54,7 +54,7 @@ public class MainMenu : IScreen
         buttons = new List<MenuButton>
         {
             new MenuButton("Play", "icons/play.png", new Color(168, 230, 207, 255), null),
-            new MenuButton("Editor", "icons/editor.png", new Color(169, 214, 245, 255), () => game.ChangeScreen(new EditorScreen(game))),
+            new MenuButton("Editor", "icons/editor.png", new Color(169, 214, 245, 255), () => game.ChangeScreen(new ProjectLibraryScreen(game))),
             new MenuButton("Account", "icons/account.png", new Color(255, 201, 168, 255), null),
             new MenuButton("Exit", "icons/exit.png", new Color(244, 169, 184, 255), () => game.Exit())
         };
